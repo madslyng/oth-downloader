@@ -46,8 +46,15 @@ python -m oth_downloader --dest /mnt/MEDIA_BACKUP/Backups/oth-downloads
 | `--limit N` | (none) | Only download the first N discovered episodes (for testing) |
 | `--dry-run` | off | Crawl and build the overview only; download nothing |
 
-Press `q` at any time to quit. It's safe to stop and re-run — already-downloaded
-files are detected via the manifest and skipped.
+Press `q` at any time to quit. The app is idempotent — it's safe to stop and
+re-run at any time:
+
+- Fully downloaded episodes are recorded in the manifest and skipped instantly.
+- A file that was interrupted mid-download (killed process, crash, etc.) is
+  resumed via HTTP `Range` requests from wherever it left off, instead of
+  starting over.
+- New episodes published since your last run are discovered by the crawl and
+  downloaded on their own — you don't need to re-download anything else.
 
 ## Notes
 

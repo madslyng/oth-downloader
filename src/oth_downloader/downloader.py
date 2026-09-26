@@ -92,13 +92,29 @@ async def download_episode(
     episode.status = Status.DOWNLOADING
     on_progress(episode)
 
+    resume_from = tmp.stat().st_size if tmp.exists() else 0
+    episode.downloaded_bytes = resume_from
+    headers = {"Range": f"bytes={resume_from}-"} if resume_from else {}
+
     try:
-        async with client.stream("GET", episode.url) as resp:
-            resp.raise_for_status()
+        async with client.stream("GET", episode.url, headers=headers) as resp:
+            if resume_from and resp.status_code == 416:
+                # Our .part is already complete (or stale/oversized) - restart clean below.
+                resume_from = 0
+                tmp.unlink(missing_ok=True)
+                episode.downloaded_bytes = 0
+            resumed = bool(resume_from) and resp.status_code == 206
+            if not resumed:
+                resp.raise_for_status()
+                if resume_from:
+                    # Server ignored our Range request (200) - start this file over.
+                    resume_from = 0
+                    episode.downloaded_bytes = 0
+
             total = int(resp.headers.get("Content-Length", 0))
-            episode.size_bytes = total
-            downloaded = 0
-            with open(tmp, "wb") as fh:
+            episode.size_bytes = resume_from + total if resumed else total
+            downloaded = resume_from
+            with open(tmp, "ab" if resumed else "wb") as fh:
                 async for chunk in resp.aiter_bytes(CHUNK_SIZE):
                     fh.write(chunk)
                     downloaded += len(chunk)
@@ -113,7 +129,7 @@ async def download_episode(
         episode.status = Status.FAILED
         episode.error = str(exc)
         manifest.mark_failed(episode.basename, episode.url, str(exc))
-        tmp.unlink(missing_ok=True)
+        # Keep the .part file on disk so the next run can resume from this offset.
     finally:
         on_progress(episode)
 
